@@ -1,5 +1,5 @@
 // ========================================
-// AI飲食店エリア分析 v1.1 — 飲食業特化版
+// AI飲食店エリア分析 v1.2 — 飲食業特化版
 // Cloudflare Workers Proxy経由でGemini API + e-Stat API
 // URL入力 + エリア名入力（都道府県・市区町村）対応
 // ========================================
@@ -578,7 +578,7 @@ async function startAreaOnlyAnalysis(area) {
     addLog('飲食市場データを取得中: ' + area.fullLabel);
     var marketPrompt = buildRestaurantMarketPrompt(dummyAnalysis, estatDataForArea, areaForPrompt);
     var marketRaw = await callGemini(marketPrompt);
-    var marketData = parseJSON(marketRaw);
+    var marketData = normalizeMarketData(parseJSON(marketRaw));
 
     // e-Statデータをマージ
     var areaEstatPop = estatDataForArea.population;
@@ -785,7 +785,7 @@ async function startUrlAnalysis(url) {
       // 飲食業専用プロンプト
       var marketPrompt = buildRestaurantMarketPrompt(analysis, estatDataForArea, area);
       var marketRaw = await callGemini(marketPrompt);
-      var marketData = parseJSON(marketRaw);
+      var marketData = normalizeMarketData(parseJSON(marketRaw));
 
       // e-Statデータをマージ
       var areaEstatPop = estatDataForArea.population;
@@ -941,43 +941,54 @@ function buildRestaurantMarketPrompt(analysis, estatData, area) {
     estatInfo + '\n\n' +
     '重要KPI: 外食支出額, 飲食店密度, 人口あたり店舗数, 世帯消費傾向, ランチ需要, ディナー需要\n' +
     'できる限り正確な数値を提供してください。不明な場合は合理的な推計値を提供してください。\n\n' +
+    '【重要: 数値の単位ルール】\n' +
+    '- 人口・世帯数・人数: 実数（例: 渋谷区なら約23万人→230000）。万単位にしないこと。\n' +
+    '- 金額（支出・単価）: 円単位の実数（例: 月間外食支出12000円→12000）\n' +
+    '- avg_household_income: 万円単位（例: 年収500万円→500）\n' +
+    '- 比率・パーセント: 0〜100の数値（例: 30%→30）\n' +
+    '- lunch_demand / dinner_demand: そのエリアの1日あたりの推定外食利用回数（食/日）。例: ランチ需要が1日5万食なら50000\n' +
+    '- daily_foot_traffic: 主要駅・商業エリアの1日あたり歩行者数（人/日）\n' +
+    '- office_worker_density: エリア内の就業者数（人）\n' +
+    '- delivery_demand_index: 100を基準とした相対指数（全国平均=100）\n' +
+    '- weekend_demand_index: 平日を100とした週末の需要比率\n' +
+    '- seat_turnover_potential: 1日の平均席回転数（回/日）\n\n' +
     '以下のJSON形式で回答してください。マークダウンのコードブロックで囲まず、純粋JSONのみ返してください:\n' +
     '{\n' +
     '  "area_name": "' + pref + ' ' + city + '",\n' +
-    '  "population": { "total_population": 0, "households": 0, "age_20_50_pct": 0, "elderly_pct": 0, "source": "" },\n' +
+    '  "population": { "total_population": "実数(人)", "households": "実数(世帯)", "age_20_50_pct": "%(0-100)", "elderly_pct": "%(0-100)", "source": "データソース名" },\n' +
     '  "dining_market": {\n' +
-    '    "monthly_dining_spend": 0,\n' +
-    '    "annual_dining_spend": 0,\n' +
-    '    "food_spend_ratio": 0,\n' +
-    '    "avg_lunch_price": 0,\n' +
-    '    "avg_dinner_price": 0,\n' +
-    '    "delivery_demand_index": 0,\n' +
-    '    "takeout_ratio_pct": 0,\n' +
+    '    "monthly_dining_spend": "円/月/世帯(実数)",\n' +
+    '    "annual_dining_spend": "円/年/世帯(実数)",\n' +
+    '    "food_spend_ratio": "%(0-100)",\n' +
+    '    "avg_lunch_price": "円(実数)",\n' +
+    '    "avg_dinner_price": "円(実数)",\n' +
+    '    "delivery_demand_index": "指数(全国平均100)",\n' +
+    '    "takeout_ratio_pct": "%(0-100)",\n' +
     '    "source": "推計"\n' +
     '  },\n' +
     '  "competition": {\n' +
-    '    "restaurant_count": 0,\n' +
-    '    "per_10k_population": 0,\n' +
-    '    "chain_ratio_pct": 0,\n' +
-    '    "same_genre_count": 0,\n' +
-    '    "new_openings_1yr": 0,\n' +
-    '    "closure_rate_pct": 0\n' +
+    '    "restaurant_count": "店舗数(実数)",\n' +
+    '    "per_10k_population": "万人あたり店舗数",\n' +
+    '    "chain_ratio_pct": "%(0-100)",\n' +
+    '    "same_genre_count": "店舗数(実数)",\n' +
+    '    "new_openings_1yr": "店舗数(実数)",\n' +
+    '    "closure_rate_pct": "%(0-100)"\n' +
     '  },\n' +
     '  "consumer_profile": {\n' +
-    '    "avg_household_income": 0,\n' +
-    '    "single_household_pct": 0,\n' +
-    '    "office_worker_density": 0,\n' +
-    '    "student_population": 0,\n' +
-    '    "tourist_visitors_annual": 0\n' +
+    '    "avg_household_income": "万円(例:500)",\n' +
+    '    "single_household_pct": "%(0-100)",\n' +
+    '    "office_worker_density": "就業者数(人・実数)",\n' +
+    '    "student_population": "学生数(人・実数)",\n' +
+    '    "tourist_visitors_annual": "年間観光客数(人・実数)"\n' +
     '  },\n' +
     '  "potential": {\n' +
-    '    "target_population": 0,\n' +
-    '    "daily_foot_traffic": 0,\n' +
-    '    "lunch_demand": 0,\n' +
-    '    "dinner_demand": 0,\n' +
-    '    "weekend_demand_index": 0,\n' +
-    '    "seat_turnover_potential": 0,\n' +
-    '    "ai_insight": "このエリアでの飲食店出店・経営戦略に関する提言(200字)"\n' +
+    '    "target_population": "ターゲット人口(人・実数)",\n' +
+    '    "daily_foot_traffic": "歩行者数(人/日・実数)",\n' +
+    '    "lunch_demand": "推定ランチ外食数(食/日・実数)",\n' +
+    '    "dinner_demand": "推定ディナー外食数(食/日・実数)",\n' +
+    '    "weekend_demand_index": "平日100基準の週末需要比",\n' +
+    '    "seat_turnover_potential": "席回転数(回/日)",\n' +
+    '    "ai_insight": "このエリアでの飲食店出店・経営戦略に関する具体的な提言。上記の数値データを引用しながら200字以内で述べてください。"\n' +
     '  }\n' +
     '}';
 }
@@ -986,18 +997,25 @@ function buildRestaurantMarketPrompt(analysis, estatData, area) {
 function buildRestaurantCrossAreaPrompt(analysis, marketsData) {
   return '以下は飲食企業の各エリアの商圏データです。経営層向けに出店戦略を分析してください。\n' +
     '特に以下の観点で分析してください:\n' +
-    '- ランチ需要 vs ディナー需要のバランス\n' +
-    '- 競合飲食店の密度と差別化余地\n' +
+    '- ランチ需要(食/日) vs ディナー需要(食/日)のバランスと具体的な数値比較\n' +
+    '- 競合飲食店の密度（万人あたり店舗数）と差別化余地\n' +
     '- テイクアウト・デリバリー展開の可能性\n' +
-    '- 客層（オフィスワーカー、学生、ファミリー、観光客）\n\n' +
+    '- 客層（就業者数、学生人口、観光客数から判断）\n' +
+    '- 各エリアの人口・世帯数に対する外食支出額の妥当性\n\n' +
+    '【データの単位】\n' +
+    '- population: 人（実数） / households: 世帯（実数）\n' +
+    '- lunch_demand / dinner_demand: 食/日（1日あたりの推定外食利用回数）\n' +
+    '- monthly_dining_spend: 円/月/世帯\n' +
+    '- office_worker_density: 就業者数（人）\n\n' +
+    '分析結果には必ず具体的な数値を引用し、エリア間の比較を行ってください。\n\n' +
     JSON.stringify(marketsData, null, 2) + '\n\n' +
     '以下のJSON形式で回答してください:\n' +
     '{\n' +
-    '  "opportunity_ranking": [{"rank":1,"area":"エリア名","reason":"理由(50字以内)","score":85},...],\n' +
-    '  "strategic_summary": "全体の出店戦略サマリー(200字以内)",\n' +
-    '  "sales_advice": "営業・マーケティングチームへのアドバイス(200字以内)",\n' +
-    '  "risk_areas": "リスクのあるエリアと理由(100字以内)",\n' +
-    '  "growth_areas": "成長が見込めるエリアと理由(100字以内)"\n' +
+    '  "opportunity_ranking": [{"rank":1,"area":"エリア名","reason":"具体的な数値を引用した理由(80字以内)","score":85},...],\n' +
+    '  "strategic_summary": "具体的な数値データを引用しながら全体の出店戦略を述べる(300字以内)",\n' +
+    '  "sales_advice": "数値に基づくマーケティングアドバイス(200字以内)",\n' +
+    '  "risk_areas": "リスクのあるエリアと数値的根拠(150字以内)",\n' +
+    '  "growth_areas": "成長が見込めるエリアと数値的根拠(150字以内)"\n' +
     '}';
 }
 
@@ -1069,6 +1087,64 @@ function extractPageSummary(html) {
   }
 }
 
+// ---- 数値正規化（Geminiの桁ズレ補正） ----
+function normalizeMarketData(data) {
+  if (!data || typeof data !== 'object') return data;
+
+  var pop = data.population;
+  if (pop) {
+    // 人口: 日本の市区町村は概ね1,000〜14,000,000。万単位で来た場合を補正
+    if (pop.total_population && pop.total_population > 0 && pop.total_population < 500) {
+      pop.total_population = Math.round(pop.total_population * 10000);
+    }
+    if (pop.households && pop.households > 0 && pop.households < 300) {
+      pop.households = Math.round(pop.households * 10000);
+    }
+  }
+
+  var dm = data.dining_market;
+  if (dm) {
+    // 月間外食支出: 一般的に5,000〜50,000円。万単位で来た場合を補正
+    if (dm.monthly_dining_spend && dm.monthly_dining_spend > 100000) {
+      // 年間値が来た可能性 → 12で割る
+      if (dm.monthly_dining_spend > 80000) {
+        dm.monthly_dining_spend = Math.round(dm.monthly_dining_spend / 12);
+      }
+    }
+    // annual = monthly * 12 の整合性チェック
+    if (dm.monthly_dining_spend && dm.annual_dining_spend) {
+      var expectedAnnual = dm.monthly_dining_spend * 12;
+      // 年間が月間より小さい場合は修正
+      if (dm.annual_dining_spend < dm.monthly_dining_spend) {
+        dm.annual_dining_spend = expectedAnnual;
+      }
+    }
+    // avg_lunch_price: 500〜2000円が一般的
+    if (dm.avg_lunch_price && dm.avg_lunch_price > 10000) {
+      dm.avg_lunch_price = Math.round(dm.avg_lunch_price / 10);
+    }
+    // avg_dinner_price: 1000〜10000円が一般的
+    if (dm.avg_dinner_price && dm.avg_dinner_price > 50000) {
+      dm.avg_dinner_price = Math.round(dm.avg_dinner_price / 10);
+    }
+  }
+
+  var cp = data.consumer_profile;
+  if (cp) {
+    // avg_household_income: 万円単位のはず(300〜800程度)。円で来た場合を補正
+    if (cp.avg_household_income && cp.avg_household_income > 10000) {
+      cp.avg_household_income = Math.round(cp.avg_household_income / 10000);
+    }
+    // office_worker_density: 人数（実数）のはず
+    if (cp.office_worker_density && cp.office_worker_density > 0 && cp.office_worker_density < 500) {
+      // 万単位で来た可能性
+      cp.office_worker_density = Math.round(cp.office_worker_density * 10000);
+    }
+  }
+
+  return data;
+}
+
 // ---- JSON Parser ----
 function parseJSON(text) {
   var cleaned = text.trim();
@@ -1102,8 +1178,8 @@ function buildComparisonTable(markets) {
     '<th>月間外食支出</th>' +
     '<th>飲食店数</th>' +
     '<th>万人あたり店舗</th>' +
-    '<th>ランチ需要</th>' +
-    '<th>ディナー需要</th>' +
+    '<th>ランチ需要(食/日)</th>' +
+    '<th>ディナー需要(食/日)</th>' +
     '</tr></thead><tbody>';
 
   var totPop = 0, totHH = 0, totSpend = 0, totRest = 0, totPer10k = 0, totLunch = 0, totDinner = 0;
@@ -1131,8 +1207,8 @@ function buildComparisonTable(markets) {
       '<td style="text-align:right;">' + formatNumber(spend) + '円</td>' +
       '<td style="text-align:right;">' + formatNumber(rest) + '</td>' +
       '<td style="text-align:right;">' + (per10k || '—') + '</td>' +
-      '<td style="text-align:right;">' + formatNumber(lunch) + '</td>' +
-      '<td style="text-align:right;">' + formatNumber(dinner) + '</td></tr>';
+      '<td style="text-align:right;">' + formatNumber(lunch) + ' 食</td>' +
+      '<td style="text-align:right;">' + formatNumber(dinner) + ' 食</td></tr>';
   });
 
   var n = cnt || 1;
@@ -1143,8 +1219,8 @@ function buildComparisonTable(markets) {
     '<td style="text-align:right;">' + formatNumber(Math.round(totSpend / n)) + '円</td>' +
     '<td style="text-align:right;">' + formatNumber(Math.round(totRest / n)) + '</td>' +
     '<td style="text-align:right;">' + (totPer10k / n).toFixed(1) + '</td>' +
-    '<td style="text-align:right;">' + formatNumber(Math.round(totLunch / n)) + '</td>' +
-    '<td style="text-align:right;">' + formatNumber(Math.round(totDinner / n)) + '</td></tr>';
+    '<td style="text-align:right;">' + formatNumber(Math.round(totLunch / n)) + ' 食</td>' +
+    '<td style="text-align:right;">' + formatNumber(Math.round(totDinner / n)) + ' 食</td></tr>';
 
   html += '</tbody></table></div>';
   return html;
@@ -1203,7 +1279,7 @@ function renderDiningDataSections(marketData) {
       '<div class="stat-grid">' +
       '<div class="stat-box"><div class="stat-box__value">' + formatNumber(cp.avg_household_income) + '<span style="font-size:14px">万円</span></div><div class="stat-box__label">平均世帯年収</div></div>' +
       '<div class="stat-box"><div class="stat-box__value">' + (cp.single_household_pct || '—') + '<span style="font-size:14px">%</span></div><div class="stat-box__label">単身世帯率</div></div>' +
-      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(cp.office_worker_density || 0) + '</div><div class="stat-box__label">オフィスワーカー密度</div></div>' +
+      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(cp.office_worker_density || 0) + '<span style="font-size:14px">人</span></div><div class="stat-box__label">就業者数</div></div>' +
       '<div class="stat-box"><div class="stat-box__value">' + formatNumber(cp.student_population || 0) + '<span style="font-size:14px">人</span></div><div class="stat-box__label">学生人口</div></div>' +
       '</div>';
     if (cp.tourist_visitors_annual) {
@@ -1222,8 +1298,8 @@ function renderDiningDataSections(marketData) {
       '<div class="stat-grid">' +
       '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.target_population) + '<span style="font-size:14px">人</span></div><div class="stat-box__label">ターゲット人口</div></div>' +
       '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.daily_foot_traffic) + '<span style="font-size:14px">人/日</span></div><div class="stat-box__label">日次歩行者数</div></div>' +
-      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.lunch_demand) + '</div><div class="stat-box__label">ランチ需要</div></div>' +
-      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.dinner_demand) + '</div><div class="stat-box__label">ディナー需要</div></div>' +
+      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.lunch_demand) + '<span style="font-size:14px">食/日</span></div><div class="stat-box__label">ランチ需要</div></div>' +
+      '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pot.dinner_demand) + '<span style="font-size:14px">食/日</span></div><div class="stat-box__label">ディナー需要</div></div>' +
       '</div>';
     if (pot.weekend_demand_index || pot.seat_turnover_potential) {
       html += '<div class="stat-grid" style="margin-top:8px;">' +
@@ -1443,8 +1519,8 @@ function renderResults(data) {
         var popSource = pop.source ? ' <span style="font-size:11px; color:var(--text-muted);">(' + escapeHtml(pop.source) + ')</span>' : '';
         html += '<div style="margin-bottom:16px;"><div style="font-size:14px; font-weight:700; margin-bottom:8px;">👥 人口・世帯データ' + popSource + '</div>' +
           '<div class="stat-grid">' +
-          '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pop.total_population) + '</div><div class="stat-box__label">総人口</div></div>' +
-          '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pop.households) + '</div><div class="stat-box__label">世帯数</div></div>' +
+          '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pop.total_population) + '<span style="font-size:14px">人</span></div><div class="stat-box__label">総人口</div></div>' +
+          '<div class="stat-box"><div class="stat-box__value">' + formatNumber(pop.households) + '<span style="font-size:14px">世帯</span></div><div class="stat-box__label">世帯数</div></div>' +
           '<div class="stat-box"><div class="stat-box__value">' + (pop.age_20_50_pct || '—') + '%</div><div class="stat-box__label">20〜50歳</div></div>' +
           '<div class="stat-box"><div class="stat-box__value">' + (pop.elderly_pct || '—') + '%</div><div class="stat-box__label">65歳以上</div></div>' +
           '</div></div>';
@@ -1572,7 +1648,7 @@ function exportExcel() {
   s0.push([]);
 
   if (markets.length > 0) {
-    s0.push(['No', 'エリア名', '人口', '世帯数', '月間外食支出(円)', '飲食店数', '万人あたり店舗', 'チェーン比率(%)', 'ランチ需要', 'ディナー需要', 'ターゲット人口', 'チャンスバー']);
+    s0.push(['No', 'エリア名', '人口(人)', '世帯数', '月間外食支出(円/世帯)', '飲食店数', '万人あたり店舗', 'チェーン比率(%)', 'ランチ需要(食/日)', 'ディナー需要(食/日)', 'ターゲット人口', 'チャンスバー']);
 
     var lunchMax = 0;
     markets.forEach(function(mkt) {
@@ -1732,7 +1808,7 @@ function exportExcel() {
         rows.push(['④ 消費者プロファイル']);
         rows.push(['平均世帯年収', (cp.avg_household_income || 0) + '万円']);
         rows.push(['単身世帯率', (cp.single_household_pct || 0) + '%']);
-        rows.push(['オフィスワーカー密度', cp.office_worker_density || '—']);
+        rows.push(['就業者数(人)', cp.office_worker_density || '—']);
         rows.push(['学生人口', cp.student_population || '—']);
         rows.push(['年間観光客数', cp.tourist_visitors_annual || '—']);
         rows.push([]);
@@ -1743,8 +1819,8 @@ function exportExcel() {
         rows.push(['⑤ 市場ポテンシャル']);
         rows.push(['ターゲット人口', formatNumber(pot.target_population) + '人']);
         rows.push(['日次歩行者数', formatNumber(pot.daily_foot_traffic) + '人/日']);
-        rows.push(['ランチ需要', formatNumber(pot.lunch_demand)]);
-        rows.push(['ディナー需要', formatNumber(pot.dinner_demand)]);
+        rows.push(['ランチ需要(食/日)', formatNumber(pot.lunch_demand)]);
+        rows.push(['ディナー需要(食/日)', formatNumber(pot.dinner_demand)]);
         rows.push(['週末需要指数', pot.weekend_demand_index || '—']);
         rows.push(['席回転ポテンシャル', (pot.seat_turnover_potential || '—') + '回']);
         if (pot.ai_insight) {
