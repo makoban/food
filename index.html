@@ -24,7 +24,7 @@
         <span class="header__logo-text">AI飲食店エリア分析</span>
       </div>
       <div class="header__actions">
-        <div class="header__badge">v1.0</div>
+        <div class="header__badge">v1.1</div>
       </div>
     </div>
   </header>
@@ -78,27 +78,27 @@
         </div>
         <h1 class="hero__title">AI飲食店エリア分析<span>飲食業特化</span></h1>
         <p class="hero__subtitle">
-          飲食店のURLを入力するだけ。<br>
+          飲食店のURLまたはエリア名を入力するだけ。<br>
           AIが商圏の外食市場データ・競合分析・消費者動向を自動レポートします。
         </p>
 
         <!-- Search Card -->
         <div class="search-card">
-          <label class="search__label" for="url-input">分析したい飲食店のHPアドレス</label>
+          <label class="search__label" for="url-input">飲食店のURLまたはエリア名を入力</label>
           <div class="search__input-wrap">
             <input
-              type="url"
+              type="text"
               id="url-input"
               class="search__input"
-              placeholder="https://example-restaurant.co.jp"
-              autocomplete="url"
+              placeholder="https://example.co.jp  or  渋谷区"
+              autocomplete="off"
             >
             <button id="analyze-btn" class="search__btn" onclick="startAnalysis()">
               <span class="btn-text">🔍 分析開始</span>
               <span class="spinner"></span>
             </button>
           </div>
-          <p class="search__hint">💡 飲食店のトップページURLを入力してください。AIがサイト内容を解析し、商圏分析を行います。</p>
+          <p class="search__hint">💡 企業URLを入力 → AIがサイト分析。エリア名（例: 渋谷区、新宿区）を入力 → エリアの飲食市場分析のみ実行。</p>
           <div id="error-msg" class="error-msg"></div>
         </div>
 
@@ -185,13 +185,28 @@
   </section>
 
 
+  <!-- Area Select Modal -->
+  <div id="area-select-modal" class="modal">
+    <div class="modal__content" style="max-width:480px;">
+      <div class="modal__header">
+        <h3>📍 エリアを選択してください</h3>
+        <button class="modal__close" onclick="document.getElementById('area-select-modal').classList.remove('active')">&times;</button>
+      </div>
+      <div class="modal__body">
+        <p class="modal__desc">同じ名前のエリアが複数見つかりました。分析したいエリアを選んでください。</p>
+        <div id="area-select-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer class="footer">
     <div class="container">
-      <p class="footer__text">© 2026 AI飲食店エリア分析 v1.0 — Powered by Gemini 2.0 Flash + e-Stat | 飲食業特化</p>
+      <p class="footer__text">© 2026 AI飲食店エリア分析 v1.1 — Powered by Gemini 2.0 Flash + e-Stat | 飲食業特化</p>
     </div>
   </footer>
 
+  <script src="area-database.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

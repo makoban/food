@@ -1,6 +1,7 @@
 // ========================================
-// AI飲食店エリア分析 v1.0 — 飲食業特化版
+// AI飲食店エリア分析 v1.1 — 飲食業特化版
 // Cloudflare Workers Proxy経由でGemini API + e-Stat API
+// URL入力 + エリア名入力（都道府県・市区町村）対応
 // ========================================
 
 // Cloudflare Worker Proxy (APIキー秘匿)
@@ -475,10 +476,172 @@ function clearLogs() {
 
 // ---- Main Analysis Flow ----
 async function startAnalysis() {
-  var url = urlInput.value.trim();
+  var input = urlInput.value.trim();
 
-  if (!url) { showError('URLを入力してください'); return; }
-  if (!isValidUrl(url)) { showError('有効なURLを入力してください（例: https://example.co.jp）'); return; }
+  if (!input) { showError('URLまたはエリア名を入力してください'); return; }
+
+  // URL or area name auto-detect
+  if (isValidUrl(input)) {
+    return startUrlAnalysis(input);
+  }
+
+  // エリア名として検索
+  hideError();
+  if (typeof searchArea === 'undefined') {
+    showError('エリアデータベースが読み込まれていません。URLを入力してください。');
+    return;
+  }
+  var candidates = searchArea(input);
+
+  if (candidates.length === 0) {
+    showError('「' + input + '」に一致するエリアが見つかりません。都道府県名や市区町村名を入力してください。');
+    return;
+  }
+
+  if (candidates.length === 1) {
+    startAreaOnlyAnalysis(candidates[0]);
+    return;
+  }
+
+  // 複数候補 → モーダル表示
+  showAreaSelectModal(candidates, input);
+}
+
+// ---- エリア選択モーダル ----
+function showAreaSelectModal(candidates, inputText) {
+  var listEl = document.getElementById('area-select-list');
+  listEl.innerHTML = '';
+
+  candidates.slice(0, 20).forEach(function(area) {
+    var btn = document.createElement('button');
+    btn.style.cssText = 'display:flex; align-items:center; gap:10px; padding:14px 18px; border:1px solid rgba(239,68,68,0.3); border-radius:12px; background:rgba(30,41,59,0.6); color:#fff; cursor:pointer; font-size:14px; transition:all 0.2s; text-align:left;';
+    btn.innerHTML = '<span style="font-size:20px;">📍</span>' +
+      '<div><div style="font-weight:700;">' + escapeHtml(area.fullLabel) + '</div>' +
+      '<div style="font-size:11px; color:var(--text-muted);">' + (area.type === 'prefecture' ? '都道府県' : '市区町村') + '</div></div>';
+
+    btn.addEventListener('mouseover', function() { btn.style.borderColor = 'rgba(239,68,68,0.6)'; btn.style.background = 'rgba(239,68,68,0.1)'; });
+    btn.addEventListener('mouseout', function() { btn.style.borderColor = 'rgba(239,68,68,0.3)'; btn.style.background = 'rgba(30,41,59,0.6)'; });
+    btn.addEventListener('click', function() {
+      document.getElementById('area-select-modal').classList.remove('active');
+      startAreaOnlyAnalysis(area);
+    });
+    listEl.appendChild(btn);
+  });
+
+  document.getElementById('area-select-modal').classList.add('active');
+}
+
+// ---- エリア名のみ分析（URL不要） ----
+async function startAreaOnlyAnalysis(area) {
+  hideError();
+  hideResults();
+  showProgress();
+  setLoading(true);
+  clearLogs();
+
+  addLog('🍽️ 飲食店エリア分析を開始します...', 'info');
+  addLog('対象エリア: ' + area.fullLabel, 'info');
+  addLog('モード: エリア直接指定（URL巡回スキップ）', 'info');
+
+  try {
+    // Step 1 & 2 をスキップ
+    completeStep('step-crawl');
+    completeStep('step-analyze');
+
+    // Step 3: 飲食市場データ取得
+    activateStep('step-market');
+
+    var prefCode = PREFECTURE_CODES[area.prefecture];
+    var estatDataForArea = {};
+    if (prefCode) {
+      estatDataForArea = await fetchEstatForRestaurant(prefCode, area.city);
+    }
+
+    var areaForPrompt = {
+      label: area.fullLabel,
+      prefecture: area.prefecture,
+      city: area.city,
+      isHQ: true
+    };
+
+    // ダミーのanalysisオブジェクト（エリア直接指定用）
+    var dummyAnalysis = {
+      company: {
+        name: area.fullLabel + ' 飲食市場分析',
+        business_type: '飲食業',
+        main_services: '飲食全般',
+        cuisine_type: '全般',
+        price_range: '不明'
+      }
+    };
+
+    addLog('飲食市場データを取得中: ' + area.fullLabel);
+    var marketPrompt = buildRestaurantMarketPrompt(dummyAnalysis, estatDataForArea, areaForPrompt);
+    var marketRaw = await callGemini(marketPrompt);
+    var marketData = parseJSON(marketRaw);
+
+    // e-Statデータをマージ
+    var areaEstatPop = estatDataForArea.population;
+    if (areaEstatPop && areaEstatPop.from_estat) {
+      if (!marketData.population) marketData.population = {};
+      marketData.population.total_population = areaEstatPop.total_population;
+      marketData.population.households = areaEstatPop.households;
+      marketData.population.source = areaEstatPop.source;
+    }
+
+    addLog('飲食市場データ取得完了', 'success');
+    completeStep('step-market');
+
+    // Step 4: レポート生成
+    activateStep('step-report');
+    addLog('飲食業分析レポート生成中...');
+    await sleep(300);
+
+    analysisData = {
+      url: '',
+      isAreaOnly: true,
+      company: {
+        name: area.fullLabel + ' 飲食市場分析',
+        business_type: '飲食業（エリア分析）',
+        main_services: '—',
+        cuisine_type: '—',
+        price_range: '—',
+        address: area.fullLabel,
+        strengths: '',
+        weaknesses: '',
+        keywords: []
+      },
+      industry: { id: 'restaurant', name: '飲食店・フード', confidence: 1.0 },
+      industryId: 'restaurant',
+      industryConfig: RESTAURANT_CONFIG,
+      location: { prefecture: area.prefecture, city: area.city },
+      markets: [{ area: areaForPrompt, data: marketData }],
+      market: marketData,
+      crossAreaInsight: null,
+      timestamp: new Date().toISOString(),
+      data_source: 'e-Stat + Gemini',
+      extracted_addresses: []
+    };
+
+    renderResults(analysisData);
+    addLog('飲食業分析レポート作成完了！', 'success');
+    completeStep('step-report');
+
+    await sleep(300);
+    hideProgress();
+    showResults();
+
+  } catch (err) {
+    console.error('Area analysis error:', err);
+    addLog('エラー: ' + err.message, 'error');
+    showError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ---- URL分析フロー ----
+async function startUrlAnalysis(url) {
 
   hideError();
   hideResults();
