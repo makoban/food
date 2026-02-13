@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI飲食店エリア分析 - 飲食業特化型商圏分析レポート自動生成</title>
+  <meta name="description" content="飲食店のURLを入力するだけで、AIが商圏の外食市場データ・競合分析・消費者動向を自動レポート。飲食業界に特化した商圏分析ツール。">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+</head>
+<body>
+
+  <!-- Background Effects -->
+  <div class="bg-grid"></div>
+  <div class="bg-blob bg-blob--1"></div>
+  <div class="bg-blob bg-blob--2"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="container header__inner">
+      <div class="header__logo">
+        <div class="header__logo-icon">🍽️</div>
+        <span class="header__logo-text">AI飲食店エリア分析</span>
+      </div>
+      <div class="header__actions">
+        <div class="header__badge">v1.0</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal">
+    <div class="modal__content">
+      <div class="modal__header">
+        <h3>🔑 API設定</h3>
+        <button class="modal__close">&times;</button>
+      </div>
+      <div class="modal__body">
+        <p class="modal__desc">Gemini APIキーを入力してください。キーはブラウザのみに保存され、外部サーバーには送信されません。</p>
+
+        <div class="form-group">
+          <label for="gemini-key">Gemini API Key <span class="badge-required">必須</span></label>
+          <input type="password" id="gemini-key" placeholder="AIza..." autocomplete="off">
+          <p class="form-help">
+            <a href="https://aistudio.google.com/apikey" target="_blank" class="guide-link">→ Google AI Studioで無料取得</a>
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="estat-key">e-Stat App ID <span class="badge-optional">任意</span></label>
+          <input type="text" id="estat-key" placeholder="アプリケーションID..." autocomplete="off">
+          <p class="form-help">
+            <a href="https://www.e-stat.go.jp/api/" target="_blank" class="guide-link">→ e-Stat APIで無料取得</a>
+            <br><span style="color: var(--text-muted); font-size: 12px;">設定すると政府統計の実データを使用します（より正確）</span>
+          </p>
+        </div>
+
+        <div class="settings-status" id="settings-status">
+          <div class="settings-status__title">ステータス</div>
+          <div id="status-content"></div>
+        </div>
+
+      </div>
+      <div class="modal__footer">
+        <button id="save-settings-btn" class="btn-primary">保存する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero__content">
+        <div class="hero__badge">
+          <span class="hero__badge-dot"></span>
+          AI-Powered Restaurant Market Analysis
+        </div>
+        <h1 class="hero__title">AI飲食店エリア分析<span>飲食業特化</span></h1>
+        <p class="hero__subtitle">
+          飲食店のURLを入力するだけ。<br>
+          AIが商圏の外食市場データ・競合分析・消費者動向を自動レポートします。
+        </p>
+
+        <!-- Search Card -->
+        <div class="search-card">
+          <label class="search__label" for="url-input">分析したい飲食店のHPアドレス</label>
+          <div class="search__input-wrap">
+            <input
+              type="url"
+              id="url-input"
+              class="search__input"
+              placeholder="https://example-restaurant.co.jp"
+              autocomplete="url"
+            >
+            <button id="analyze-btn" class="search__btn" onclick="startAnalysis()">
+              <span class="btn-text">🔍 分析開始</span>
+              <span class="spinner"></span>
+            </button>
+          </div>
+          <p class="search__hint">💡 飲食店のトップページURLを入力してください。AIがサイト内容を解析し、商圏分析を行います。</p>
+          <div id="error-msg" class="error-msg"></div>
+        </div>
+
+        <!-- Features -->
+        <div class="features">
+          <div class="feature-item">
+            <div class="feature-item__icon">🌐</div>
+            <div class="feature-item__title">HP全ページ解析</div>
+            <div class="feature-item__desc">AIが店舗情報を自動分析</div>
+          </div>
+          <div class="feature-item">
+            <div class="feature-item__icon">🍽️</div>
+            <div class="feature-item__title">飲食市場データ</div>
+            <div class="feature-item__desc">外食支出・競合・需要を取得</div>
+          </div>
+          <div class="feature-item">
+            <div class="feature-item__icon">📊</div>
+            <div class="feature-item__title">Excel出力</div>
+            <div class="feature-item__desc">分析結果をワンクリック出力</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Progress -->
+  <section id="progress-section" class="progress-section">
+    <div class="container">
+      <div class="progress__steps">
+        <div class="progress__step" id="step-crawl">
+          <div class="progress__step-icon">🌐</div>
+          <div class="progress__step-content">
+             <div class="progress__step-title">Webサイト取得</div>
+             <div class="progress__step-desc">ページ内容を取得中...</div>
+          </div>
+        </div>
+        <div class="progress__step" id="step-analyze">
+          <div class="progress__step-icon">🤖</div>
+          <div class="progress__step-content">
+             <div class="progress__step-title">AI店舗分析</div>
+             <div class="progress__step-desc">店舗情報とエリアを特定中...</div>
+          </div>
+        </div>
+        <div class="progress__step" id="step-market">
+          <div class="progress__step-icon">🍽️</div>
+          <div class="progress__step-content">
+             <div class="progress__step-title">飲食市場データ生成</div>
+             <div class="progress__step-desc">AIが商圏の飲食市場を分析中...</div>
+          </div>
+        </div>
+        <div class="progress__step" id="step-report">
+          <div class="progress__step-icon">📄</div>
+          <div class="progress__step-content">
+             <div class="progress__step-title">レポート作成</div>
+             <div class="progress__step-desc">飲食業分析レポートを生成中...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed Log Area -->
+      <div class="progress__logs">
+        <div class="progress__logs-header">詳細ログ</div>
+        <div id="progress-log-content" class="progress__logs-content">
+          <div class="log-item">待機中...</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section id="results-section" class="results-section">
+    <div class="container">
+      <div class="results__header">
+        <h2 class="results__title">📋 飲食店エリア分析レポート</h2>
+        <div class="results__actions">
+          <button class="btn-pdf" onclick="exportExcel()" style="background:linear-gradient(135deg,#10b981,#059669);">📊 Excel出力</button>
+          <button class="btn-rerun" onclick="resetAll()">🔄 新規分析開始</button>
+        </div>
+      </div>
+      <div id="results-content">
+        <!-- Dynamically filled by app.js -->
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <p class="footer__text">© 2026 AI飲食店エリア分析 v1.0 — Powered by Gemini 2.0 Flash + e-Stat | 飲食業特化</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
